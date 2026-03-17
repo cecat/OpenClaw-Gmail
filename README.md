@@ -69,3 +69,55 @@ openclaw/       Example openclaw.json agent stanza
 ## Quick start
 
 See [SETUP.md](SETUP.md) for the full step-by-step.
+
+---
+
+## Related work
+
+[Harper Reed](https://harperreed.com)'s
+[GSuite MCP Server](https://github.com/2389-research/gsuite-mcp) takes a
+different and complementary approach: it exposes Gmail, Calendar, Contacts, and
+Tasks as native MCP tools that an LLM can call directly, without any shell
+scripting layer in between. It is well-engineered, fast (Go), and covers
+considerably more of the Google Workspace surface area than this project does.
+
+The philosophy here is deliberately narrower. Bulk operations — paging through
+hundreds of sent messages, filtering addresses, counting frequencies, checking
+contact existence — are handled by plain shell/Python scripts that run
+deterministically, produce no surprises, and consume no LLM tokens. The LLM is
+only invoked for tasks that genuinely require language understanding: analysing
+writing style, formatting a digest, deciding what is worth your attention.
+
+**gsuite-mcp may suit you better if:**
+- You want a faster path to a working assistant with minimal scripting
+- Your use cases are mostly interactive (compose, reply, schedule) rather than
+  bulk or scheduled
+- You prefer to let the model handle API orchestration directly rather than
+  wrapping it in scripts
+
+**This approach may suit you better if:**
+- You are running scheduled, unattended workloads (daily digests, contact
+  harvests) where reliability and cost matter more than flexibility
+- You want auditability — every API call is in a readable bash or Python script
+  you can inspect, test, and fix independently of the LLM
+- You are sensitive to inference cost today
+
+The two approaches share the same underlying assumption: models are improving
+rapidly, and the operational cost of calling them will continue to fall. The
+difference is tactical, not philosophical. The scripting layer here is a
+present-day choice — optimising for reliability and cost right now — not a
+claim that it will always be the right architecture.
+
+There is also a conceptual parallel worth noting. The scripts in this project
+are effectively tools: the agent decides what to do, calls a script, and
+receives structured output — the same pattern as MCP tool-calling, just
+implemented in bash and Python rather than as a registered MCP server. A common
+pattern in multi-agent OpenClaw deployments is to decompose work across highly
+specialised agents — one agent manages contacts, another handles writing-style
+capture, another reads and triages email. This project takes the same
+decomposition idea but applies it within a single agent: rather than spawning a
+separate contacts agent, the agent calls a contacts management script. The
+three-tier scheduling system (HEARTBEAT / CALENDAR / TODO) follows the same
+logic — a deterministic external clock handles *when*, the model handles *what*
+— and that separation is likely to remain a sound design regardless of how
+capable models become.
