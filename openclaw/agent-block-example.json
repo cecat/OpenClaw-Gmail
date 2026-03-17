@@ -1,0 +1,32 @@
+{
+  "_comment": "Add this block to the 'agents' section of your openclaw.json config.",
+  "_comment2": "Replace all YOUR_* placeholders before applying.",
+  "_comment3": "Apply with: docker cp openclaw.json openclaw:/config/ && python3 apply-config.sh",
+
+  "YOUR_AGENT_ID": {
+    "workspace": "/home/YOUR_SYSTEM_USER/code/spark-ai-agents/YOUR_AGENT_ID",
+    "sandbox": {
+      "image": "openclaw-sandbox:latest",
+      "env": {
+        "AGENT_ID": "YOUR_AGENT_ID",
+        "GOG_ACCOUNT": "YOUR_GMAIL_ADDRESS",
+        "GOG_CLIENT": "YOUR_GOG_CLIENT_NAME",
+        "GOG_KEYRING_BACKEND": "file",
+        "GOG_KEYRING_FILE_PATH": "/gog-keyring/keyring.json",
+        "KEYRING_BACKEND": "keyrings.alt.file.PlaintextKeyring",
+        "PYTHON_KEYRING_BACKEND": "keyrings.alt.file.PlaintextKeyring"
+      },
+      "volumes": {
+        "/home/YOUR_SYSTEM_USER/code/spark-ai-agents/shared": "/shared",
+        "/home/YOUR_SYSTEM_USER/code/spark-ai-agents/scripts": "/scripts:ro",
+        "/home/YOUR_SYSTEM_USER/.config/gog/YOUR_GOG_CLIENT_NAME": "/gog-keyring"
+      }
+    },
+    "slack_channels": [
+      "YOUR_SLACK_CHANNEL_ID"
+    ],
+    "slack_allowlist": [
+      "YOUR_SLACK_USER_ID"
+    ]
+  }
+}

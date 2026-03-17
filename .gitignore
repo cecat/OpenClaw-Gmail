@@ -1,0 +1,15 @@
+# Agent runtime state — managed by cron and agent, not source
+agent/TODO.md
+agent/memory/*.md
+
+# Secrets — never commit
+.env
+*.key
+*.pem
+secrets*
+credentials*.json
+client_secret*.json
+
+# OS
+.DS_Store
+*.log
