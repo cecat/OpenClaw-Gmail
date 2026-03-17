@@ -15,11 +15,6 @@
 #   3. Address pattern filter — rejects no-reply, newsletter, list, bounce, etc.
 #   4. Domain block list — rejects known automated sending platforms
 #   5. Frequency >= 2 — address must appear in To: of at least 2 separate sent messages
-#
-# JSON structure from gog gmail get --format metadata --results-only:
-#   { "headers": { "to": "...", "subject": "...", "from": "...", "cc": "..." },
-#     "message": { ... } }
-# The top-level "headers" dict uses lowercase keys.
 
 set -euo pipefail
 
@@ -53,7 +48,10 @@ TOTAL=$(wc -l < "$TMPIDS" | tr -d ' ')
 echo "[harvest-sent-contacts] found $TOTAL sent messages to scan" >&2
 
 # ── Pass 1: collect metadata for all messages, build frequency count ─────────
-# gog returns pretty-printed JSON; compact each message to a single line for JSONL.
+# gog gmail get --format metadata --results-only returns:
+#   { "headers": { "to": "...", "subject": "...", "from": "...", "cc": "..." },
+#     "message": { ... } }
+# We use the top-level "headers" dict (lowercase keys).
 
 TMPDATA=$(mktemp)
 
@@ -135,6 +133,7 @@ with open('${TMPDATA}') as f:
 
         for m in EMAIL_RE.finditer(to_val):
             email = m.group().lower()
+            local = email.split('@')[0]
             domain = email.split('@')[1] if '@' in email else ''
 
             # Rule 3: address pattern
@@ -168,6 +167,7 @@ echo "[harvest-sent-contacts] $QUALIFIED addresses qualified (freq>=2, passed al
 ADDED=0
 ALREADY=0
 FAILED=0
+TMPADDED=$(mktemp)  # accumulates JSONL of successfully added contacts
 
 while IFS=$'\t' read -r email display_name; do
 
@@ -189,6 +189,7 @@ while IFS=$'\t' read -r email display_name; do
       if gog contacts create --email "$email" --given "$given" --family "$family" \
           --no-input 2>/dev/null; then
         echo "[harvest-sent-contacts] added: $given $family <$email>" >&2
+        echo "{\"email\": \"$email\", \"name\": \"$given $family\"}" >> "$TMPADDED"
         ADDED=$((ADDED+1))
       else
         echo "[harvest-sent-contacts] FAILED: $email" >&2
@@ -198,6 +199,7 @@ while IFS=$'\t' read -r email display_name; do
       if gog contacts create --email "$email" --given "$given" \
           --no-input 2>/dev/null; then
         echo "[harvest-sent-contacts] added: $given <$email>" >&2
+        echo "{\"email\": \"$email\", \"name\": \"$given\"}" >> "$TMPADDED"
         ADDED=$((ADDED+1))
       else
         echo "[harvest-sent-contacts] FAILED: $email" >&2
@@ -215,14 +217,28 @@ for email in d['freq']:
 
 rm -f "$TMPIDS" "$TMPDATA" "$TMPFREQ"
 
-python3 -c "
+python3 << PYEOF
 import json
+
+added_list = []
+try:
+    with open('$TMPADDED') as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                added_list.append(json.loads(line))
+except:
+    pass
+
 print(json.dumps({
   'after_date': '$AFTER_DATE',
   'messages_scanned': $TOTAL,
   'addresses_qualified': $QUALIFIED,
   'contacts_added': $ADDED,
+  'contacts_added_list': added_list,
   'contacts_already_existed': $ALREADY,
   'contacts_failed': $FAILED
 }, indent=2))
-"
+PYEOF
+
+rm -f "$TMPADDED"

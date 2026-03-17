@@ -128,6 +128,14 @@ Update `/workspace/CHANGELOG.md` with a brief entry.
 
 DM YOUR_NAME (YOUR_SLACK_USER_ID):
 > "One-time sync complete.
->  Sent harvest: [N] contacts added, [N] already existed.
->  Received harvest: [N] contacts added, [N] skipped (no name determinable).
->  writing-style.md updated with analysis of [N] sent messages."
+>
+> **Sent harvest:** [N] added, [N] already existed.
+> Added: Name <email>, Name <email>, ... (list each from contacts_added_list)
+>
+> **Received harvest:** [N] added, [N] skipped (name not determinable).
+> Added: Name <email> [ph: xxx] [org: xxx], ... (list each from contacts_added_list,
+>   including phone and org where populated)
+>
+> **Writing style:** updated with analysis of [N] sent messages."
+
+If either contacts_added_list is empty, omit that "Added:" line and just report the count.

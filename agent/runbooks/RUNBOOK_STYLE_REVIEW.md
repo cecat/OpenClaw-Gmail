@@ -91,7 +91,15 @@ Update `/workspace/CHANGELOG.md`.
 
 DM YOUR_NAME (YOUR_SLACK_USER_ID) only if the style guide was meaningfully changed
 or new contacts were added:
-> "Monthly review complete. [section names] updated in writing-style.md
->  based on [N] sent messages. [N] new contacts added from inbox harvest."
+> "Monthly review complete.
+>
+> **Style:** [section names] updated based on [N] sent messages.
+> (or: No style changes needed.)
+>
+> **New contacts — sent harvest:** [N] added.
+> Added: Name <email>, ... (list each from contacts_added_list; omit line if empty)
+>
+> **New contacts — received harvest:** [N] added.
+> Added: Name <email> [ph: xxx] [org: xxx], ... (omit line if empty)"
 
-If nothing changed, no DM required.
+If nothing changed and no contacts were added, no DM required.

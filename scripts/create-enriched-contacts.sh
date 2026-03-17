@@ -28,6 +28,7 @@ ADDED=0
 SKIPPED_NO_NAME=0
 SKIPPED_EXISTS=0
 FAILED=0
+TMPADDED=$(mktemp)  # accumulates JSONL of successfully added contacts
 
 while IFS= read -r line || [[ -n "$line" ]]; do
   [[ -z "$line" ]] && continue
@@ -67,6 +68,7 @@ while IFS= read -r line || [[ -n "$line" ]]; do
 
   if "${cmd[@]}" 2>/dev/null; then
     echo "[create-enriched-contacts] added: $given $family <$from_email>${phone:+ ph:$phone}${org:+ org:$org}" >&2
+    echo "{\"email\": \"$from_email\", \"name\": \"$given${family:+ $family}\"${phone:+, \"phone\": \"$phone\"}${org:+, \"org\": \"$org\"}}" >> "$TMPADDED"
     ADDED=$((ADDED+1))
   else
     echo "[create-enriched-contacts] FAILED: $from_email" >&2
@@ -75,12 +77,26 @@ while IFS= read -r line || [[ -n "$line" ]]; do
 
 done < "$INPUT"
 
-python3 -c "
+python3 << PYEOF
 import json
+
+added_list = []
+try:
+    with open('$TMPADDED') as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                added_list.append(json.loads(line))
+except:
+    pass
+
 print(json.dumps({
   'contacts_added': $ADDED,
+  'contacts_added_list': added_list,
   'skipped_no_name': $SKIPPED_NO_NAME,
   'skipped_already_existed': $SKIPPED_EXISTS,
   'failed': $FAILED
 }, indent=2))
-"
+PYEOF
+
+rm -f "$TMPADDED"
