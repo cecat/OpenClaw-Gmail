@@ -1,0 +1,12 @@
+{
+  "_comment": "Rules that elevate message priority in inbox analysis.",
+  "_comment2": "Types: domain matches sender domain; subject_keyword matches subject.",
+  "rules": [
+    {
+      "type": "domain",
+      "value": "YOUR_WORK_DOMAIN.org",
+      "priority": "high",
+      "note": "Work domain \u2014 always summarise in digest and analysis"
+    }
+  ]
+}

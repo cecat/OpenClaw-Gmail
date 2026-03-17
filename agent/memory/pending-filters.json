@@ -1,0 +1,5 @@
+{
+  "_comment": "Filters suggested by inbox analysis, awaiting review.",
+  "_comment2": "Review entries here and move approved ones to email-filters.json.",
+  "filters": []
+}

@@ -20,42 +20,87 @@ If output is `PROCEED`: continue to Step 2.
 
 ---
 
-## Step 2 — Contacts harvest (script does all API work)
+## Step 2 — Sent-mail contacts harvest (script)
 
 ```
 exec: /scripts/harvest-sent-contacts.sh
 ```
 
-This script:
-- Pages through 12 months of sent mail
-- Extracts **To: recipients only** (Cc: is skipped)
-- Skips forwarded threads (Fwd:/FW: subjects)
-- Rejects automated address patterns (no-reply, newsletter, bounce, etc.)
-- Rejects known automated sending domains (mailchimp, sendgrid, etc.)
-- Only adds addresses that appeared in **2 or more** separate sent messages
-- Outputs a summary JSON to stdout
+This script pages through 12 months of sent mail, extracts To: recipients,
+applies filtering rules (no automated addresses, freq >= 2), and adds
+qualifying addresses to Google Contacts.
 
-Note: the contact list will not include every address ever emailed — only
-genuine recurring human contacts. This is by design.
-
-Save the JSON output to `/workspace/memory/onetime-sync-contacts-result.json`.
+Save the JSON output to `/workspace/memory/onetime-sync-sent-result.json`.
 
 ---
 
-## Step 3 — Email sample collection (script does all API work)
+## Step 3 — Received-mail contact candidates (script)
+
+```
+exec: /scripts/harvest-received-contacts.sh
+```
+
+This script pages through 12 months of inbox mail, counts sender frequency,
+applies the same filtering rules, skips addresses already in contacts, and
+writes candidates (with message bodies) to `/tmp/gmail-agent-received-candidates.jsonl`.
+It does NOT create contacts — that happens after the LLM extraction step.
+
+Save the JSON summary output to `/workspace/memory/onetime-sync-received-result.json`.
+
+---
+
+## Step 4 — Name and contact detail extraction (LLM)
+
+Read `/tmp/gmail-agent-received-candidates.jsonl`.
+
+For each record, examine `from_display_name` and `body_text` to extract:
+- `given`: first/given name (string or null)
+- `family`: family/last name (string or null)
+- `phone`: phone number in any format found in the body (string or null)
+- `org`: organization or company name (string or null)
+- `title`: job title (string or null)
+
+Rules:
+- Do **not** guess. If you cannot determine a field with confidence, set it to null.
+- `from_display_name` is the primary name source; check the body/signature for
+  more detail (full name, phone, org).
+- For phone: look for patterns like US numbers (312-555-1234, (312) 555-1234),
+  international (+972-50-...), or phrases like "my number is..." or "call me at...".
+- If the display name is clearly a group, list, or mailing address (e.g. "ABC
+  Newsletter", "Team Foo"), set all fields to null — this record will be skipped.
+- Email address local parts are unreliable proxies for names — do not use
+  `jane` from `jane@foo.com` as a given name unless the body confirms it.
+
+Write one JSON line per input record to `/tmp/gmail-agent-enriched-candidates.jsonl`:
+```json
+{"from_email": "...", "given": "...", "family": "...", "phone": "...", "org": "...", "title": "..."}
+```
+
+---
+
+## Step 5 — Create enriched contacts (script)
+
+```
+exec: /scripts/create-enriched-contacts.sh
+```
+
+This script reads `/tmp/gmail-agent-enriched-candidates.jsonl`, skips records where
+`given` is null, and calls `gog contacts create` with all available fields.
+
+---
+
+## Step 6 — Email sample collection (script)
 
 ```
 exec: /scripts/harvest-sent-sample.sh
 ```
 
-This script:
-- Fetches up to 100 representative sent messages from the past 12 months
-- Skips self-sent messages and very short messages
-- Writes sample to `/tmp/gmail-agent-sent-sample.jsonl`
+Fetches up to 100 representative sent messages from the past 12 months.
+Writes sample to `/tmp/gmail-agent-sent-sample.jsonl`.
 
 ---
 
-## Step 4 — Writing style analysis (LLM work)
+## Step 7 — Writing style analysis (LLM)
 
 Read `/tmp/gmail-agent-sent-sample.jsonl`.
 Read existing `/workspace/writing-style.md`.
@@ -73,7 +118,7 @@ Write updates to `/workspace/writing-style.md`.
 
 ---
 
-## Step 5 — Set guard flag and report
+## Step 8 — Set guard flag and report
 
 ```
 exec: echo "Completed: $(date -u +%Y-%m-%dT%H:%M:%SZ)" > /workspace/memory/onetime-sync-complete
@@ -81,6 +126,8 @@ exec: echo "Completed: $(date -u +%Y-%m-%dT%H:%M:%SZ)" > /workspace/memory/oneti
 
 Update `/workspace/CHANGELOG.md` with a brief entry.
 
-DM YOUR_SLACK_USER_ID:
-> "One-time sync complete. [N] contacts added, [N] already existed.
+DM YOUR_NAME (YOUR_SLACK_USER_ID):
+> "One-time sync complete.
+>  Sent harvest: [N] contacts added, [N] already existed.
+>  Received harvest: [N] contacts added, [N] skipped (no name determinable).
 >  writing-style.md updated with analysis of [N] sent messages."

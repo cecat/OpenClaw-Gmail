@@ -1,0 +1,5 @@
+{
+  "_comment": "Filters suggested by inbox analysis and approved by YOUR_NAME.",
+  "_comment2": "To apply a pending filter: gog gmail filter create --from <address> --label Review/Filtered",
+  "filters": []
+}

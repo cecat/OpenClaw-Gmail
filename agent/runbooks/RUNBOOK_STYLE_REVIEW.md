@@ -2,7 +2,8 @@
 
 **Triggered by:** CALENDAR.md entry (monthly) or YOUR_NAME via Slack.
 
-**Runs:** Monthly. Reviews last 30 days of sent mail and updates writing-style.md.
+**Runs:** Monthly. Reviews last 30 days of sent mail, updates writing-style.md,
+and harvests any new contacts from the past 30 days of inbox mail.
 
 ---
 
@@ -12,7 +13,7 @@
 exec: /scripts/harvest-sent-sample.sh --days 30
 ```
 
-Output is written to `/tmp/gmail-agent-sent-sample.jsonl`.
+Output written to `/tmp/gmail-agent-sent-sample.jsonl`.
 
 ---
 
@@ -32,7 +33,7 @@ any section you modify: `_(updated YYYY-MM-DD)_`.
 
 ---
 
-## Step 3 — Update contacts for new recipients (script)
+## Step 3 — Update sent-mail contacts for new recipients (script)
 
 ```
 exec: /scripts/harvest-sent-contacts.sh --days 30
@@ -40,12 +41,57 @@ exec: /scripts/harvest-sent-contacts.sh --days 30
 
 ---
 
-## Step 4 — Log and report
+## Step 4 — Received-mail contact candidates (script)
+
+```
+exec: /scripts/harvest-received-contacts.sh --days 30
+```
+
+Output written to `/tmp/gmail-agent-received-candidates.jsonl`.
+
+---
+
+## Step 5 — Name and contact detail extraction (LLM)
+
+Read `/tmp/gmail-agent-received-candidates.jsonl`.
+
+For each record, examine `from_display_name` and `body_text` to extract:
+- `given`: first/given name (string or null)
+- `family`: family/last name (string or null)
+- `phone`: phone number in any format found in the body (string or null)
+- `org`: organization or company name (string or null)
+- `title`: job title (string or null)
+
+Rules:
+- Do **not** guess. If you cannot determine a field with confidence, set it to null.
+- `from_display_name` is the primary name source; check body/signature for detail.
+- For phone: look for US patterns (312-555-1234) or international (+972-50-...),
+  or phrases like "my number is..." or "call me at...".
+- If the display name is clearly a group or list, set all fields to null.
+- Do not use email local parts as names without body confirmation.
+
+Write one JSON line per input record to `/tmp/gmail-agent-enriched-candidates.jsonl`:
+```json
+{"from_email": "...", "given": "...", "family": "...", "phone": "...", "org": "...", "title": "..."}
+```
+
+---
+
+## Step 6 — Create enriched contacts (script)
+
+```
+exec: /scripts/create-enriched-contacts.sh
+```
+
+---
+
+## Step 7 — Log and report
 
 Update `/workspace/CHANGELOG.md`.
 
-DM YOUR_SLACK_USER_ID only if the style guide was meaningfully changed:
-> "Monthly style review complete. Updated [section names] in writing-style.md
->  based on [N] sent messages from the past 30 days."
+DM YOUR_NAME (YOUR_SLACK_USER_ID) only if the style guide was meaningfully changed
+or new contacts were added:
+> "Monthly review complete. [section names] updated in writing-style.md
+>  based on [N] sent messages. [N] new contacts added from inbox harvest."
 
-If no changes were needed, no DM required.
+If nothing changed, no DM required.
