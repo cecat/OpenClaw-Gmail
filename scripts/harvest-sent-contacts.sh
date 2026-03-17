@@ -118,6 +118,12 @@ with open('${TMPDATA}') as f:
         h = d.get('headers', {})
         subj    = h.get('subject', '')
         to_val  = h.get('to', '')
+        from_v  = h.get('from', '').lower()
+
+        # gog returns thread-root messages regardless of in:sent filter, so
+        # received messages bleed through. Skip anything not sent by SELF.
+        if SELF not in from_v:
+            continue
 
         # Rule 2: skip forwarded threads
         if re.match(r'^(fwd?|fw)[:\s]', subj, re.IGNORECASE):
