@@ -103,3 +103,36 @@ giving an LLM access to individual messages. The two tools made different
 choices appropriate to their intended use cases. Ours happened to require
 `messages.list`, so we replaced GOG with direct API calls via `urllib`, using
 the OAuth token that gsuite-mcp provisions.
+
+
+---
+
+## OpenClaw Context and Inference: What Operators Need to Know
+
+**The 8 auto-loaded files.** On every inference call — every Slack message, every
+heartbeat — OpenClaw reads exactly 8 named files from the agent workspace into the
+system prompt: `AGENTS.md`, `SOUL.md`, `TOOLS.md`, `IDENTITY.md`, `USER.md`,
+`HEARTBEAT.md`, `BOOTSTRAP.md`, and `MEMORY.md`. No other files (runbooks,
+templates, CALENDAR.md, etc.) are loaded automatically; the agent must explicitly
+read them via tool call. The per-file budget is 20,000 characters; the total budget
+across all 8 files is 150,000 characters. These limits are set in `openclaw.json`
+under `agents.defaults.bootstrapMaxChars` and `agents.defaults.bootstrapTotalMaxChars`.
+
+**Behavioral implication.** Hard rules — output formats, approval requirements,
+channel hygiene — belong in the 8 auto-loaded files (preferably `SOUL.md` or
+`IDENTITY.md`). If a format spec lives only in a template file, the agent will
+ignore it whenever its session history contains examples of an older format.
+The session replay (accumulated conversation history) can override written
+instructions; the 8 auto-loaded files are the only reliable anchor.
+
+**Prefill vs. generation — why TTFT is interactive.** The model runs at ~50
+tokens/second, but that figure applies only to *output generation*. Input
+processing (prefill) is parallel — the GPU computes attention for all input
+tokens simultaneously as a single matrix operation, typically completing in
+1–3 seconds for a normal agent context. Time To First Token equals prefill
+time. Even a 150,000-character system prompt (~37,500 tokens) takes roughly
+15–30 seconds to prefill, not the hours a naive calculation implies. The
+actual latency risk is unbounded session history: OpenClaw replays the full
+conversation on every call, and sessions that grow very large (hundreds of
+thousands of tokens) produce multi-minute prefill times. Daily session resets
+(see `spark-ai-agents/ARCHITECTURE.md`) address this.
