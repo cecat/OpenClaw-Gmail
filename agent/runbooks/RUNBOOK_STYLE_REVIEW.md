@@ -3,24 +3,22 @@
 **Triggered by:** CALENDAR.md entry (monthly) or YOUR_NAME via Slack.
 
 **Runs:** Monthly. Reviews last 30 days of sent mail, updates writing-style.md,
-and harvests any new contacts from the past 30 days of inbox mail.
+and harvests any new contacts from the past 30 days.
 
 ---
 
-## Step 1 — Collect last 30 days of sent mail (script)
+## Step 1 — Collect last 30 days of sent mail
 
+Calculate the date 30 days ago in YYYY/MM/DD format:
 ```
-exec: /scripts/harvest-sent-sample.sh --days 30
+exec: python3 /scripts/gmail_api.py search "in:sent after:YYYY/MM/DD" --max 100 --format full
 ```
-
-Output written to `/tmp/gmail-agent-sent-sample.jsonl`.
 
 ---
 
 ## Step 2 — Update writing style (LLM)
 
-Read `/tmp/gmail-agent-sent-sample.jsonl`.
-Read existing `/workspace/writing-style.md`.
+Read `/workspace/writing-style.md`.
 
 Compare the recent sample to the existing style guide. Ask:
 - Have any patterns shifted?
@@ -33,73 +31,54 @@ any section you modify: `_(updated YYYY-MM-DD)_`.
 
 ---
 
-## Step 3 — Update sent-mail contacts for new recipients (script)
+## Step 3 — Sent-mail contact harvest
 
 ```
-exec: /scripts/harvest-sent-contacts.sh --days 30
+exec: python3 /scripts/gmail_api.py search "in:sent after:YYYY/MM/DD" --max 200 --format headers
 ```
 
----
-
-## Step 4 — Received-mail contact candidates (script)
-
+Apply the same filtering rules as RUNBOOK_ONETIME_SYNC Step 2 (skip self,
+automated addresses, low-frequency senders). For any qualifying address not
+yet in contacts, create it:
 ```
-exec: /scripts/harvest-received-contacts.sh --days 30
-```
-
-Output written to `/tmp/gmail-agent-received-candidates.jsonl`.
-
----
-
-## Step 5 — Name and contact detail extraction (LLM)
-
-Read `/tmp/gmail-agent-received-candidates.jsonl`.
-
-For each record, examine `from_display_name` and `body_text` to extract:
-- `given`: first/given name (string or null)
-- `family`: family/last name (string or null)
-- `phone`: phone number in any format found in the body (string or null)
-- `org`: organization or company name (string or null)
-- `title`: job title (string or null)
-
-Rules:
-- Do **not** guess. If you cannot determine a field with confidence, set it to null.
-- `from_display_name` is the primary name source; check body/signature for detail.
-- For phone: look for US patterns (312-555-1234) or international (+972-50-...),
-  or phrases like "my number is..." or "call me at...".
-- If the display name is clearly a group or list, set all fields to null.
-- Do not use email local parts as names without body confirmation.
-
-Write one JSON line per input record to `/tmp/gmail-agent-enriched-candidates.jsonl`:
-```json
-{"from_email": "...", "given": "...", "family": "...", "phone": "...", "org": "...", "title": "..."}
+exec: python3 /scripts/contacts_api.py create --email EMAIL --given GIVEN [--family FAMILY]
 ```
 
 ---
 
-## Step 6 — Create enriched contacts (script)
+## Step 4 — Received-mail contact candidates
 
 ```
-exec: /scripts/create-enriched-contacts.sh
+exec: python3 /scripts/gmail_api.py search "in:inbox after:YYYY/MM/DD" --max 200 --format headers
+```
+
+For freq ≥ 2 senders not in contacts, fetch one message body:
+```
+exec: python3 /scripts/gmail_api.py get MESSAGE_ID --format full
+```
+
+Run LLM extraction (given/family/phone/org/title — same rules as
+RUNBOOK_ONETIME_SYNC Step 3), then:
+```
+exec: python3 /scripts/contacts_api.py create --email EMAIL --given GIVEN \
+  [--family FAMILY] [--phone PHONE] [--org ORG] [--title TITLE]
 ```
 
 ---
 
-## Step 7 — Log and report
+## Step 5 — Log and report
 
 Update `/workspace/CHANGELOG.md`.
 
-DM YOUR_NAME (YOUR_SLACK_USER_ID) only if the style guide was meaningfully changed
-or new contacts were added:
+DM YOUR_NAME (YOUR_SLACK_USER_ID) only if the style guide changed or new
+contacts were added:
 > "Monthly review complete.
 >
-> **Style:** [section names] updated based on [N] sent messages.
+> **Style:** sections updated based on N sent messages.
 > (or: No style changes needed.)
 >
-> **New contacts — sent harvest:** [N] added.
-> Added: Name <email>, ... (list each from contacts_added_list; omit line if empty)
+> **Sent harvest:** N added. Added: Name \<email\>, ... (omit if none)
 >
-> **New contacts — received harvest:** [N] added.
-> Added: Name <email> [ph: xxx] [org: xxx], ... (omit line if empty)"
+> **Received harvest:** N added. Added: Name \<email\> [ph: xxx], ... (omit if none)"
 
-If nothing changed and no contacts were added, no DM required.
+If nothing changed and no contacts were added, no DM needed.

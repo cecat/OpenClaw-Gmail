@@ -2,29 +2,32 @@
 
 **Triggered by:** CALENDAR.md entry daily at YOUR_DIGEST_TIME UTC.
 
-**Delivers:** Email to YOUR_DIGEST_EMAIL summarizing today's inbox messages
+**Delivers:** Email to YOUR_DIGEST_EMAIL summarising today's inbox messages
 from known contacts. This send is pre-approved — no per-message confirmation needed.
 
 ---
 
-## Step 1 — Fetch inbox and classify senders (script)
+## Step 1 — Fetch today's inbox
+
+Calculate today's date in YYYY/MM/DD format. Fetch unread messages:
 
 ```
-exec: /scripts/fetch-inbox-digest.sh
+exec: python3 /scripts/gmail_api.py search "in:inbox is:unread after:YYYY/MM/DD" --max 50 --format headers
 ```
 
-Output is written to `/tmp/gmail-agent-inbox-digest.jsonl`.
-Format: one JSON object per line: `{message_id, from, from_email, in_contacts, subject, snippet}`
+For each message, check whether the sender is a known contact:
+```
+exec: python3 /scripts/contacts_api.py search FROM_EMAIL
+```
+
+Build a list of messages tagged `in_contacts: true/false`.
 
 ---
 
 ## Step 2 — Check for anything to report
 
-Read `/tmp/gmail-agent-inbox-digest.jsonl`.
-
-If the file is empty, or no messages have `in_contacts: true`:
-- Write a single line to `/tmp/gmail-agent-digest-body.txt`:
-  `No messages from known contacts today.`
+If the message list is empty, or no messages have `in_contacts: true`:
+- Body text: `No messages from known contacts today.`
 - Skip to Step 4 (send anyway — YOUR_NAME expects the daily email).
 
 ---
@@ -34,23 +37,21 @@ If the file is empty, or no messages have `in_contacts: true`:
 For each message where `in_contacts` is true, write a digest entry:
 
 ```
-From: <from name> (<from_email>)
+From: <display name> (<email>)
 Subject: <subject>
 <snippet>
 ```
 
 Separate entries with a blank line. Keep the digest factual — do not editorialize.
 
-Also include a brief section at the bottom listing senders NOT in contacts
-(just names/addresses, no content):
+Include a brief section at the bottom listing senders NOT in contacts:
 
 ```
 --- Also received (not in contacts) ---
-<from_email>: <subject>
-...
+<email>: <subject>
 ```
 
-If there are no non-contact messages, omit this section.
+Omit this section if there are no non-contact messages.
 
 Write the full digest to `/tmp/gmail-agent-digest-body.txt`.
 
@@ -59,26 +60,16 @@ Write the full digest to `/tmp/gmail-agent-digest-body.txt`.
 ## Step 4 — Send digest email (pre-approved standing action)
 
 ```
-exec: gog gmail send \
+exec: python3 /scripts/gmail_api.py send \
   --to YOUR_DIGEST_EMAIL \
-  --subject "Daily Email Digest - $(date +%Y-%m-%d)" \
+  --subject "Daily Email Digest - DATE" \
   --body-file /tmp/gmail-agent-digest-body.txt
 ```
 
 ---
 
-## Step 5 — Extensibility notes (for future rules)
-
-The digest filter can be expanded by updating `fetch-inbox-digest.sh` to also flag:
-- Messages where subject contains a keyword from a watchlist
-- Messages from a domain on a watchlist (e.g., @yourorganization.org)
-
-The script outputs structured JSONL — the LLM only needs to handle presentation.
-
----
-
-## Step 6 — Cleanup
+## Step 5 — Cleanup
 
 ```
-exec: rm -f /tmp/gmail-agent-inbox-digest.jsonl /tmp/gmail-agent-digest-body.txt
+exec: rm -f /tmp/gmail-agent-digest-body.txt
 ```

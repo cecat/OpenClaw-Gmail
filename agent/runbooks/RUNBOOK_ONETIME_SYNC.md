@@ -20,105 +20,100 @@ If output is `PROCEED`: continue to Step 2.
 
 ---
 
-## Step 2 — Sent-mail contacts harvest (script)
+## Step 2 — Sent-mail contacts harvest
+
+Calculate the date 12 months ago in YYYY/MM/DD format. Search sent mail:
 
 ```
-exec: /scripts/harvest-sent-contacts.sh
+exec: python3 /scripts/gmail_api.py search "in:sent after:YYYY/MM/DD" --max 500 --format headers
 ```
 
-This script pages through 12 months of sent mail, extracts To: recipients,
-applies filtering rules (no automated addresses, freq >= 2), and adds
-qualifying addresses to Google Contacts.
+From the JSON output, collect all unique email addresses from `To` and `Cc` headers.
+Parse each address using the pattern `Display Name <email@domain>` or bare `email@domain`.
 
-Save the JSON output to `/workspace/memory/onetime-sync-sent-result.json`.
+**Filtering rules — skip any address that:**
+- Is YOUR_GMAIL_ADDRESS (self)
+- Local part matches: no-reply, noreply, do-not-reply, donotreply, newsletter,
+  notifications, notify, alerts, automated, bounce, mailer-daemon, postmaster,
+  unsubscribe, support, helpdesk, billing, invoice, orders, shipping, admin,
+  webmaster, marketing, promo, info, contact, hello, team, sales
+- Domain contains: mailchimp, sendgrid, amazonses, sparkpost, hubspot, zendesk,
+  github, gitlab, circleci, pagerduty, slack.com, zoom.us, linkedin, twitter, facebook
+
+**Frequency filter:** only keep addresses that appear in `To` or `Cc` of **2 or more**
+distinct sent messages.
+
+For each qualifying address, check whether it already exists:
+```
+exec: python3 /scripts/contacts_api.py search EMAIL
+```
+
+For addresses where `found` is false, extract the best display name from the
+`To` header. Parse into given/family if clearly two words; otherwise use full
+display name as given name only. Create the contact:
+```
+exec: python3 /scripts/contacts_api.py create --email EMAIL --given GIVEN [--family FAMILY]
+```
+
+Track every successfully created contact: `{email, name}`.
 
 ---
 
-## Step 3 — Received-mail contact candidates (script)
+## Step 3 — Received-mail contact candidates
 
+Search inbox:
 ```
-exec: /scripts/harvest-received-contacts.sh
+exec: python3 /scripts/gmail_api.py search "in:inbox after:YYYY/MM/DD" --max 500 --format headers
 ```
 
-This script pages through 12 months of inbox mail, counts sender frequency,
-applies the same filtering rules, skips addresses already in contacts, and
-writes candidates (with message bodies) to `/tmp/gmail-agent-received-candidates.jsonl`.
-It does NOT create contacts — that happens after the LLM extraction step.
+From the `From` headers, count sender frequency. Apply the same filtering rules
+as Step 2. Skip addresses already in contacts (check with `contacts_api.py search`).
 
-Save the JSON summary output to `/workspace/memory/onetime-sync-received-result.json`.
+For each sender with **frequency ≥ 2** who is not yet in contacts, fetch the
+body of their most recent message:
+```
+exec: python3 /scripts/gmail_api.py get MESSAGE_ID --format full
+```
+
+**LLM extraction:** For each candidate, examine `from` display name and `body`
+to extract:
+- `given`: first/given name — **do not guess; null if uncertain**
+- `family`: family name — null if uncertain
+- `phone`: any phone number in the body/signature (US or international)
+- `org`: organisation or company name
+- `title`: job title
+
+Rules: Do not derive names from email local parts. If the display name is
+clearly a mailing list or automated sender, set all fields to null.
+
+For each candidate where `given` is not null:
+```
+exec: python3 /scripts/contacts_api.py create --email EMAIL --given GIVEN \
+  [--family FAMILY] [--phone PHONE] [--org ORG] [--title TITLE]
+```
+
+Track every successfully created contact: `{email, name, phone, org}`.
 
 ---
 
-## Step 4 — Name and contact detail extraction (LLM)
+## Step 4 — Writing style analysis
 
-Read `/tmp/gmail-agent-received-candidates.jsonl`.
-
-For each record, examine `from_display_name` and `body_text` to extract:
-- `given`: first/given name (string or null)
-- `family`: family/last name (string or null)
-- `phone`: phone number in any format found in the body (string or null)
-- `org`: organization or company name (string or null)
-- `title`: job title (string or null)
-
-Rules:
-- Do **not** guess. If you cannot determine a field with confidence, set it to null.
-- `from_display_name` is the primary name source; check the body/signature for
-  more detail (full name, phone, org).
-- For phone: look for patterns like US numbers (312-555-1234, (312) 555-1234),
-  international (+972-50-...), or phrases like "my number is..." or "call me at...".
-- If the display name is clearly a group, list, or mailing address (e.g. "ABC
-  Newsletter", "Team Foo"), set all fields to null — this record will be skipped.
-- Email address local parts are unreliable proxies for names — do not use
-  `jane` from `jane@foo.com` as a given name unless the body confirms it.
-
-Write one JSON line per input record to `/tmp/gmail-agent-enriched-candidates.jsonl`:
-```json
-{"from_email": "...", "given": "...", "family": "...", "phone": "...", "org": "...", "title": "..."}
+Collect up to 100 sent messages with full body:
+```
+exec: python3 /scripts/gmail_api.py search "in:sent after:YYYY/MM/DD" --max 100 --format full
 ```
 
----
-
-## Step 5 — Create enriched contacts (script)
-
-```
-exec: /scripts/create-enriched-contacts.sh
-```
-
-This script reads `/tmp/gmail-agent-enriched-candidates.jsonl`, skips records where
-`given` is null, and calls `gog contacts create` with all available fields.
-
----
-
-## Step 6 — Email sample collection (script)
-
-```
-exec: /scripts/harvest-sent-sample.sh
-```
-
-Fetches up to 100 representative sent messages from the past 12 months.
-Writes sample to `/tmp/gmail-agent-sent-sample.jsonl`.
-
----
-
-## Step 7 — Writing style analysis (LLM)
-
-Read `/tmp/gmail-agent-sent-sample.jsonl`.
-Read existing `/workspace/writing-style.md`.
-
-Analyze the email sample and update `writing-style.md` with findings. Focus on:
-- Overall tone (formal / professional / casual)
-- Typical greeting and closing patterns (with examples)
-- Sentence length and structure tendencies
-- Vocabulary and phrasing characteristics
-- What YOUR_NAME consistently does NOT do
-- 3–5 representative verbatim sentences that exemplify the style
-- Notes by email type (brief reply vs. longer message vs. note to self)
+Read existing `/workspace/writing-style.md`. Analyse the sample and update the
+style guide. Focus on: overall tone, typical greeting and closing patterns
+(with verbatim examples), sentence length and structure, vocabulary
+characteristics, what YOUR_NAME consistently does NOT do, 3–5 representative
+verbatim sentences, and notes by email type (brief reply vs. longer message).
 
 Write updates to `/workspace/writing-style.md`.
 
 ---
 
-## Step 8 — Set guard flag and report
+## Step 5 — Set guard flag and report
 
 ```
 exec: echo "Completed: $(date -u +%Y-%m-%dT%H:%M:%SZ)" > /workspace/memory/onetime-sync-complete
@@ -129,13 +124,10 @@ Update `/workspace/CHANGELOG.md` with a brief entry.
 DM YOUR_NAME (YOUR_SLACK_USER_ID):
 > "One-time sync complete.
 >
-> **Sent harvest:** [N] added, [N] already existed.
-> Added: Name <email>, Name <email>, ... (list each from contacts_added_list)
+> **Sent harvest:** N added, N already existed.
+> Added: Name \<email\>, Name \<email\> ... (list each; omit line if none)
 >
-> **Received harvest:** [N] added, [N] skipped (name not determinable).
-> Added: Name <email> [ph: xxx] [org: xxx], ... (list each from contacts_added_list,
->   including phone and org where populated)
+> **Received harvest:** N added, N skipped (name not determinable).
+> Added: Name \<email\> [ph: xxx] [org: xxx], ... (list each; omit line if none)
 >
-> **Writing style:** updated with analysis of [N] sent messages."
-
-If either contacts_added_list is empty, omit that "Added:" line and just report the count.
+> **Writing style:** updated with analysis of N sent messages."

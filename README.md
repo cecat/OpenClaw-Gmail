@@ -1,9 +1,55 @@
 # OpenClaw Gmail Agent
 
 A drop-in agent for [OpenClaw](https://openclaw.ai) that manages a Gmail inbox,
-Google Calendar, and Google Contacts on your behalf. It triages email, delivers
-a daily digest, maintains a contacts list from your sent mail, and learns your
-writing style so it can draft replies for your approval.
+Google Contacts, and writing style on your behalf. It triages email, delivers
+a daily digest, maintains a contacts list from your sent and received mail, and
+learns your writing style so it can draft replies for your approval.
+
+---
+
+## How we got here — the GOG detour
+
+The first version of this project used [GOG](https://github.com/toqueteos/gog),
+a third-party CLI that wraps the Google APIs. It handled OAuth and offered a
+convenient `gog gmail list` command, so it seemed like a natural fit for
+harvesting contacts from sent mail.
+
+The problem: GOG's Gmail list command calls the [threads.list](https://developers.google.com/gmail/api/reference/rest/v1/users.threads/list)
+endpoint, not [messages.list](https://developers.google.com/gmail/api/reference/rest/v1/users.messages/list).
+`threads.list` returns one entry per conversation thread — and that entry is
+always the **first** (oldest) message of the thread, not the matching message.
+Applied to a "sent" query, it returned inbound messages from other people rather
+than your own outbound replies. Contact harvesting silently failed: the addresses
+extracted were senders *to* you, not recipients *from* you, and they were already
+in your inbox. No new contacts were ever added.
+
+We confirmed this by reading GOG's source code, which shows a direct call to
+`s.svc.Users.Threads.List("me")`. The workaround would have been to fetch every
+matching thread and then scan inside it — a round-trip per thread, expensive,
+and still fragile because GOG doesn't expose the underlying messages API.
+
+The fix was to drop GOG entirely and call the Gmail REST API directly.
+
+---
+
+## How gsuite-mcp made this simple
+
+[Harper Reed](https://harperreed.com)'s
+[gsuite-mcp](https://github.com/2389-research/gsuite-mcp) turned out to be
+exactly the right tool — not as an MCP tool (OpenClaw ignores MCP servers), but
+as an **OAuth setup helper**. Running `gsuite-mcp setup` handles the full
+browser-based consent flow, writes a standard Google OAuth2 `token.json` to
+`~/.local/share/gsuite-mcp/token.json`, and manages token refresh. That token
+is a plain Google OAuth2 token that any HTTP client can use.
+
+The result: two small stdlib-only Python scripts (`gmail_api.py`,
+`contacts_api.py`) that read gsuite-mcp's token directly and call the Gmail
+and People APIs via `urllib`. No pip dependencies, no keyring daemon, no
+wrapper scripts. The Docker sandbox just needs a bind mount for the token
+directory and it works.
+
+What was ~740 lines across 5 bash scripts (most of it keyring plumbing and
+GOG workarounds) became ~360 lines in two readable Python files.
 
 ---
 
@@ -11,11 +57,9 @@ writing style so it can draft replies for your approval.
 
 ### 1. Sandboxing
 
-Each agent runs in an isolated Docker container (sandbox) with explicit bind
-mounts. The agent can only read or write paths you explicitly grant — its own
-workspace, a shared directory, and specific credential files. Nothing else on
-the host is accessible. This limits blast radius if the agent misbehaves and
-makes it easy to audit exactly what it can touch.
+Each agent runs in an isolated Docker container with explicit bind mounts.
+The agent can only read or write paths you explicitly grant — its own workspace,
+a shared directory, and specific credential files.
 
 ### 2. Scheduling — three tiers
 
@@ -30,39 +74,42 @@ the human. `TODO.md` is runtime state and is gitignored.
 
 ### 3. Scripts vs. LLM
 
-Deterministic work belongs in shell/Python scripts: paging through the Gmail
-API, extracting email addresses, checking whether a contact exists, writing
-JSON files. These are fast, auditable, and do not consume LLM tokens.
+Deterministic, procedural work belongs in Python scripts: paging through the
+Gmail API, extracting email addresses, checking whether a contact exists,
+writing JSON. These are fast, auditable, and consume no LLM tokens.
 
 The LLM handles what it is actually good at: reading a sample of your sent
 email and synthesising a writing-style guide, formatting a digest, deciding
-whether a message is important. The scripts produce structured data (JSONL);
-the LLM reads it and generates natural language output.
+whether a message is worth your attention, extracting names and phone numbers
+from email signatures. The scripts produce structured data; the LLM reads it
+and generates natural language output.
+
+This separation maps directly onto how gsuite-mcp is used: Harper's server
+does the OAuth heavy lifting (browser flow, token refresh), and our scripts
+do the bulk data work (pagination, filtering, frequency counting) that would
+be expensive and fragile if left to an LLM.
 
 ---
 
 ## What you get
 
-- **`@agent` email commands** — send email to yourself with `@YOUR_AGENT_ID` in
-  the subject line to queue tasks for the agent from anywhere
-- **Daily digest** — email to your preferred address summarising inbox messages
-  from known contacts
-- **Contact hygiene** — recipients from your sent mail are added to Google
-  Contacts automatically, with filtering to exclude mailing lists and automated
-  senders
-- **Writing style learning** — the agent analyses your sent mail and maintains a
+- **Daily digest** — email summarising inbox messages from known contacts
+- **Contact hygiene** — recipients from sent mail are added to Google Contacts
+  automatically, with name/phone/org extraction from email signatures
+- **Writing style learning** — the agent analyses sent mail and maintains a
   style guide it uses when drafting replies
-- **Monthly style refresh** — the style guide is updated from the past 30 days
-  of sent mail
+- **Monthly style refresh** — updated from the past 30 days of sent mail
+- **Inbox triage** — action items, urgency flags, and meeting requests surfaced
+  to Slack twice daily
 
 ---
 
 ## Repository layout
 
 ```
-agent/          Drop-in workspace — copy this into your OpenClaw agents directory
+agent/          Drop-in workspace — copy into your OpenClaw agents directory
   runbooks/     Step-by-step procedures the LLM follows
-scripts/        Deterministic shell/Python scripts (no LLM)
+scripts/        Python scripts for deterministic API work (no LLM)
 openclaw/       Example openclaw.json agent stanza
 ```
 
@@ -75,49 +122,28 @@ See [SETUP.md](SETUP.md) for the full step-by-step.
 ## Related work
 
 [Harper Reed](https://harperreed.com)'s
-[GSuite MCP Server](https://github.com/2389-research/gsuite-mcp) takes a
-different and complementary approach: it exposes Gmail, Calendar, Contacts, and
-Tasks as native MCP tools that an LLM can call directly, without any shell
-scripting layer in between. It is well-engineered, fast (Go), and covers
-considerably more of the Google Workspace surface area than this project does.
+[gsuite-mcp](https://github.com/2389-research/gsuite-mcp) exposes Gmail,
+Calendar, Contacts, and Tasks as native MCP tools that an LLM can call
+directly, and it is what makes this project work. We use gsuite-mcp for OAuth
+setup and rely on the token it writes for all direct API calls.
 
-The philosophy here is deliberately narrower. Bulk operations — paging through
-hundreds of sent messages, filtering addresses, counting frequencies, checking
-contact existence — are handled by plain shell/Python scripts that run
-deterministically, produce no surprises, and consume no LLM tokens. The LLM is
-only invoked for tasks that genuinely require language understanding: analysing
-writing style, formatting a digest, deciding what is worth your attention.
+Harper's server correctly calls `users.messages.list` (not `threads.list`),
+which is what revealed the GOG bug and pointed the way to the right fix.
 
 **gsuite-mcp may suit you better if:**
 - You want a faster path to a working assistant with minimal scripting
-- Your use cases are mostly interactive (compose, reply, schedule) rather than
+- Your use cases are mostly interactive (compose, reply, search) rather than
   bulk or scheduled
-- You prefer to let the model handle API orchestration directly rather than
-  wrapping it in scripts
+- You are using an agent framework that can actually invoke MCP tools
+  (note: OpenClaw ignores MCP servers — it cannot call gsuite-mcp tools directly)
 
 **This approach may suit you better if:**
 - You are running scheduled, unattended workloads (daily digests, contact
-  harvests) where reliability and cost matter more than flexibility
-- You want auditability — every API call is in a readable bash or Python script
-  you can inspect, test, and fix independently of the LLM
-- You are sensitive to inference cost today
+  harvests) where determinism and cost matter
+- You want auditability — every API call is in a readable Python script you
+  can inspect, test, and fix independently of the LLM
+- You are sensitive to inference cost for bulk operations
 
-The two approaches share the same underlying assumption: models are improving
-rapidly, and the operational cost of calling them will continue to fall. The
-difference is tactical, not philosophical. The scripting layer here is a
-present-day choice — optimising for reliability and cost right now — not a
-claim that it will always be the right architecture.
-
-There is also a conceptual parallel worth noting. The scripts in this project
-are effectively tools: the agent decides what to do, calls a script, and
-receives structured output — the same pattern as MCP tool-calling, just
-implemented in bash and Python rather than as a registered MCP server. A common
-pattern in multi-agent OpenClaw deployments is to decompose work across highly
-specialised agents — one agent manages contacts, another handles writing-style
-capture, another reads and triages email. This project takes the same
-decomposition idea but applies it within a single agent: rather than spawning a
-separate contacts agent, the agent calls a contacts management script. The
-three-tier scheduling system (HEARTBEAT / CALENDAR / TODO) follows the same
-logic — a deterministic external clock handles *when*, the model handles *what*
-— and that separation is likely to remain a sound design regardless of how
-capable models become.
+The two are complementary, not competing. gsuite-mcp handles OAuth; these
+scripts handle bulk data work. The split reflects the same principle that
+runs through the whole project: use the right tool for each job.

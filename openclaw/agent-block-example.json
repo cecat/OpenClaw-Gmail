@@ -1,25 +1,21 @@
 {
   "_comment": "Add this block to the 'agents' section of your openclaw.json config.",
   "_comment2": "Replace all YOUR_* placeholders before applying.",
-  "_comment3": "Apply with: docker cp openclaw.json openclaw:/config/ && python3 apply-config.sh",
+  "_comment3": "After editing openclaw.json, restart the gateway: docker compose restart openclaw-gateway",
 
   "YOUR_AGENT_ID": {
-    "workspace": "/home/YOUR_SYSTEM_USER/code/spark-ai-agents/YOUR_AGENT_ID",
+    "workspace": "/home/YOUR_SYSTEM_USER/openclaw-workspace/YOUR_AGENT_ID",
     "sandbox": {
       "image": "openclaw-sandbox:latest",
       "env": {
         "AGENT_ID": "YOUR_AGENT_ID",
-        "GOG_ACCOUNT": "YOUR_GMAIL_ADDRESS",
-        "GOG_CLIENT": "YOUR_GOG_CLIENT_NAME",
-        "GOG_KEYRING_BACKEND": "file",
-        "GOG_KEYRING_FILE_PATH": "/gog-keyring/keyring.json",
-        "KEYRING_BACKEND": "keyrings.alt.file.PlaintextKeyring",
-        "PYTHON_KEYRING_BACKEND": "keyrings.alt.file.PlaintextKeyring"
+        "HOME": "/tmp"
       },
       "volumes": {
         "/home/YOUR_SYSTEM_USER/code/spark-ai-agents/shared": "/shared",
-        "/home/YOUR_SYSTEM_USER/code/spark-ai-agents/scripts": "/scripts:ro",
-        "/home/YOUR_SYSTEM_USER/.config/gog/YOUR_GOG_CLIENT_NAME": "/gog-keyring"
+        "/usr/local/bin/gmail-agent": "/scripts:ro",
+        "/home/YOUR_SYSTEM_USER/.local/share/gsuite-mcp": "/tmp/.local/share/gsuite-mcp:rw",
+        "/home/YOUR_SYSTEM_USER/.config/gsuite-mcp": "/tmp/.config/gsuite-mcp:ro"
       }
     },
     "slack_channels": [
