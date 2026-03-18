@@ -84,7 +84,7 @@ See [SETUP.md](SETUP.md) for the full step-by-step.
 
 ## Note on GOG
 
-An earlier version of this project used [GOG](https://github.com/toqueteos/gog)
+An earlier version of this project used [GOG](https://github.com/steipete/gogcli)
 as the Gmail CLI. GOG is a third-party command-line wrapper around a subset of
 the Google APIs. It was a natural fit here because OpenClaw agents execute shell
 commands — calling a CLI tool is simpler than embedding auth and HTTP code —
