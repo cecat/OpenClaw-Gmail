@@ -85,9 +85,21 @@ See [SETUP.md](SETUP.md) for the full step-by-step.
 ## Note on GOG
 
 An earlier version of this project used [GOG](https://github.com/toqueteos/gog)
-as the Gmail CLI. GOG's list command calls `threads.list` rather than
-`messages.list`, which returns the first message of each thread regardless of
-query filters. A "sent mail" search silently returned inbound messages rather
-than outbound replies, so contact harvesting never worked. We replaced GOG with
-direct `messages.list` calls via `urllib`, using the OAuth token that
-gsuite-mcp provisions.
+as the Gmail CLI. GOG is a third-party command-line wrapper around a subset of
+the Google APIs. It was a natural fit here because OpenClaw agents execute shell
+commands — calling a CLI tool is simpler than embedding auth and HTTP code —
+and GOG handles OAuth so you do not have to write any of that yourself.
+
+The problem is that GOG's list command calls `threads.list`, which gives a
+conversational view (one result per thread). This is a sensible choice for a
+human browsing email, but `threads.list` returns the first message of each
+thread regardless of search filters. A "sent mail" query silently returned
+inbound messages rather than outbound replies, so contact harvesting never
+worked. `messages.list` — which respects filters and returns individual messages
+— exists in the Google API; GOG simply does not expose it.
+
+gsuite-mcp uses `messages.list` because it was built for a different purpose:
+giving an LLM access to individual messages. The two tools made different
+choices appropriate to their intended use cases. Ours happened to require
+`messages.list`, so we replaced GOG with direct API calls via `urllib`, using
+the OAuth token that gsuite-mcp provisions.
